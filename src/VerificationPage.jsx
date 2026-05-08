@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // Mock QR Code Component using simple divs
-const QRCodeMock = () => (
-  <div className="w-32 h-32 bg-white p-2 rounded-xl shadow-sm grid grid-cols-5 grid-rows-5 gap-1 relative">
+const QRCodeMock = ({ isExpired = false }) => (
+  <div className={`w-32 h-32 bg-white p-2 rounded-xl shadow-sm grid grid-cols-5 grid-rows-5 gap-1 relative transition-opacity duration-500 ${isExpired ? 'opacity-20' : 'opacity-100'}`}>
     {/* Corner squares */}
     <div className="col-span-2 row-span-2 border-[3px] border-stone-800 rounded-md p-1">
       <div className="w-full h-full bg-stone-800 rounded-sm"></div>
@@ -29,24 +29,28 @@ const QRCodeMock = () => (
 
 const VerificationPage = () => {
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [step, setStep] = useState('welcome'); // 'welcome' | 'verification'
+  const [step, setStep] = useState('welcome'); // 'welcome' | 'verification' | 'expired'
   const [inputName, setInputName] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isExpired, setIsExpired] = useState(false);
   const [verificationId, setVerificationId] = useState('');
+  const [activationTimestamp, setActivationTimestamp] = useState(null);
 
   useEffect(() => {
     // 1. Check local storage for existing session
     const savedName = localStorage.getItem('oasis_customer_name');
     const savedDate = localStorage.getItem('oasis_issue_date');
+    const savedTimestamp = localStorage.getItem('oasis_activation_timestamp');
     const today = new Date().toDateString();
 
     if (savedName && savedDate) {
       if (savedDate !== today) {
-        setIsExpired(true);
+        // Expired on load
+        localStorage.clear();
+        setStep('welcome');
       } else {
         setCustomerName(savedName);
+        if (savedTimestamp) setActivationTimestamp(parseInt(savedTimestamp, 10));
         setStep('verification');
       }
     }
@@ -66,9 +70,16 @@ const VerificationPage = () => {
       const now = new Date();
       setCurrentTime(now);
       
-      // Check if we rolled over to a new day
-      if (savedDate && savedDate !== now.toDateString()) {
-        setIsExpired(true);
+      // Check if we rolled over to a new day while tab is open
+      const currentIssueDate = localStorage.getItem('oasis_issue_date');
+      if (currentIssueDate && currentIssueDate !== now.toDateString()) {
+        setStep(current => {
+          if (current === 'verification') {
+            localStorage.clear();
+            return 'expired';
+          }
+          return current;
+        });
       }
     }, 1000);
 
@@ -85,10 +96,14 @@ const VerificationPage = () => {
     setTimeout(() => {
       const name = inputName.trim();
       const today = new Date().toDateString();
+      const timestamp = new Date().getTime();
       
       setCustomerName(name);
+      setActivationTimestamp(timestamp);
+      
       localStorage.setItem('oasis_customer_name', name);
       localStorage.setItem('oasis_issue_date', today);
+      localStorage.setItem('oasis_activation_timestamp', timestamp.toString());
       
       // Also save the generated ID if not already saved
       if (!localStorage.getItem('oasis_verification_id') || localStorage.getItem('oasis_issue_date') !== today) {
@@ -119,24 +134,6 @@ const VerificationPage = () => {
       hour12: true
     });
   };
-
-  if (isExpired) {
-    return (
-      <div className="min-h-screen bg-stone-100 flex flex-col items-center justify-center p-6 text-center font-sans">
-        <h1 className="text-3xl font-light text-stone-800 mb-4">Pass Expired</h1>
-        <p className="text-stone-500">This partnership discount was only valid for the original issue date.</p>
-        <button 
-          onClick={() => {
-            localStorage.clear();
-            window.location.reload();
-          }}
-          className="mt-8 text-sm text-primary underline"
-        >
-          Start New Session
-        </button>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-[#F9F8F6] flex flex-col items-center py-12 px-4 sm:px-6 font-sans relative overflow-hidden text-stone-800 selection:bg-primary/20">
@@ -248,32 +245,53 @@ const VerificationPage = () => {
             </motion.div>
           )}
 
-          {step === 'verification' && (
+          {(step === 'verification' || step === 'expired') && (
             <motion.div 
-              key="verification"
+              key="verification-card"
               className="bg-white/60 backdrop-blur-2xl border border-white/60 shadow-[0_8px_40px_rgb(0,0,0,0.04)] rounded-[2rem] p-8 relative overflow-hidden"
               initial={{ opacity: 0, scale: 0.95, filter: "blur(5px)" }}
               animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
               transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
             >
-              {/* Pulsing Verified Live Indicator */}
-              <div className="absolute top-6 right-6 flex items-center space-x-2 bg-primary/10 px-3 py-1.5 rounded-full border border-primary/20 shadow-sm backdrop-blur-sm">
-                <motion.div 
-                  className="w-2 h-2 rounded-full bg-primary"
-                  animate={{ opacity: [1, 0.4, 1], scale: [1, 1.2, 1] }}
-                  transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-                />
-                <span className="text-[10px] font-bold text-primary tracking-wider uppercase">Verified Live</span>
+              {/* Pulsing Verified Live / Expired Indicator */}
+              <div className={`absolute top-6 right-6 flex items-center space-x-2 px-3 py-1.5 rounded-full border shadow-sm backdrop-blur-sm transition-colors duration-500 ${step === 'expired' ? 'bg-red-50/80 border-red-100/50' : 'bg-primary/10 border-primary/20'}`}>
+                {step === 'expired' ? (
+                  <div className="w-2 h-2 rounded-full bg-red-500" />
+                ) : (
+                  <motion.div 
+                    className="w-2 h-2 rounded-full bg-primary"
+                    animate={{ opacity: [1, 0.4, 1], scale: [1, 1.2, 1] }}
+                    transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                  />
+                )}
+                <span className={`text-[10px] font-bold tracking-wider uppercase ${step === 'expired' ? 'text-red-700' : 'text-primary'}`}>
+                  {step === 'expired' ? 'Expired' : 'Verified Live'}
+                </span>
               </div>
 
-              {/* Welcome Message */}
+              {/* Welcome Message / Expired Message */}
               <div className="mt-10 mb-8">
-                <h2 className="text-3xl font-light text-stone-800 mb-3">
-                  Welcome, <span className="font-medium text-primary">{customerName}</span>
-                </h2>
-                <p className="text-stone-500 leading-relaxed text-[15px]">
-                  Thanks for riding with Method Collective today. Enjoy <span className="font-semibold text-primary">7% off</span> at OASIS Jimma.
-                </p>
+                <AnimatePresence mode="wait">
+                  {step === 'expired' ? (
+                    <motion.div key="msg-expired" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                      <h2 className="text-3xl font-light text-stone-800 mb-3 text-red-700">
+                        Session Expired
+                      </h2>
+                      <p className="text-stone-500 leading-relaxed text-[15px]">
+                        Please attend a Method Collective class today to activate a new wellness pass.
+                      </p>
+                    </motion.div>
+                  ) : (
+                    <motion.div key="msg-valid" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                      <h2 className="text-3xl font-light text-stone-800 mb-3">
+                        Welcome, <span className="font-medium text-primary">{customerName}</span>
+                      </h2>
+                      <p className="text-stone-500 leading-relaxed text-[15px]">
+                        Thanks for riding with Method Collective today. Enjoy <span className="font-semibold text-primary">7% off</span> at OASIS Jimma.
+                      </p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
 
               <div className="h-px w-full bg-gradient-to-r from-transparent via-stone-200 to-transparent my-8 opacity-60"></div>
@@ -281,7 +299,7 @@ const VerificationPage = () => {
               {/* Live Date and Time Section */}
               <div className="flex flex-col items-center justify-center space-y-2 mb-10">
                 <motion.div 
-                  className="text-[2.5rem] font-light text-stone-800 tracking-tight tabular-nums leading-none"
+                  className={`text-[2.5rem] font-light tracking-tight tabular-nums leading-none transition-colors duration-500 ${step === 'expired' ? 'text-stone-400' : 'text-stone-800'}`}
                   key={formatTime(currentTime)}
                   initial={{ opacity: 0.8, filter: "blur(2px)" }}
                   animate={{ opacity: 1, filter: "blur(0px)" }}
@@ -295,9 +313,16 @@ const VerificationPage = () => {
               </div>
 
               {/* QR Code Section */}
-              <div className="flex flex-col items-center bg-stone-50/80 rounded-2xl p-6 mb-8 border border-stone-100">
-                <QRCodeMock />
-                <div className="mt-4 text-center">
+              <div className="flex flex-col items-center bg-stone-50/80 rounded-2xl p-6 mb-8 border border-stone-100 relative">
+                {step === 'expired' && (
+                  <div className="absolute inset-0 z-10 flex items-center justify-center">
+                    <div className="bg-white/80 backdrop-blur-sm px-4 py-2 rounded-full border border-stone-200 text-xs font-semibold text-stone-500 tracking-widest uppercase">
+                      Disabled
+                    </div>
+                  </div>
+                )}
+                <QRCodeMock isExpired={step === 'expired'} />
+                <div className={`mt-4 text-center transition-opacity duration-500 ${step === 'expired' ? 'opacity-40' : 'opacity-100'}`}>
                   <p className="text-[10px] text-stone-400 font-mono tracking-widest uppercase mb-1">Session ID</p>
                   <p className="text-xs font-semibold text-stone-700 tracking-wider">
                     {verificationId}
@@ -305,19 +330,34 @@ const VerificationPage = () => {
                 </div>
               </div>
 
-              {/* Validation Badge */}
-              <div className="flex justify-center mb-6">
-                <motion.div 
-                  className="bg-stone-800 text-white px-6 py-2.5 rounded-full text-xs font-semibold tracking-widest shadow-md"
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  VALID TODAY ONLY
-                </motion.div>
-              </div>
+              {/* Validation Badge / Activation Timestamp */}
+              <AnimatePresence mode="wait">
+                {step === 'expired' ? (
+                  <motion.div key="expired-badge" className="flex justify-center mb-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                    <div className="bg-stone-200 text-stone-500 px-6 py-2.5 rounded-full text-xs font-semibold tracking-widest shadow-inner">
+                      PASS INVALID
+                    </div>
+                  </motion.div>
+                ) : (
+                  <motion.div key="valid-badge" className="flex flex-col items-center mb-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                    <motion.div 
+                      className="bg-stone-800 text-white px-6 py-2.5 rounded-full text-xs font-semibold tracking-widest shadow-md mb-3"
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      VALID TODAY ONLY
+                    </motion.div>
+                    {activationTimestamp && (
+                      <div className="text-[10px] text-stone-400 font-mono tracking-wide">
+                        Activated: {new Date(activationTimestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-              <p className="text-center text-sm text-stone-500 font-medium">
-                Please present this screen at checkout.
+              <p className={`text-center text-sm font-medium transition-colors duration-500 ${step === 'expired' ? 'text-stone-400' : 'text-stone-500'}`}>
+                {step === 'expired' ? 'This pass cannot be redeemed.' : 'Please present this screen at checkout.'}
               </p>
             </motion.div>
           )}
@@ -331,6 +371,7 @@ const VerificationPage = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.5 }}
+              exit={{ opacity: 0 }}
             >
               <p className="text-[11px] text-stone-400 leading-relaxed max-w-[280px] mx-auto">
                 Offer valid only on the date shown above. Cannot be combined with other offers.
